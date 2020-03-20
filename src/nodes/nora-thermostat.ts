@@ -44,9 +44,9 @@ module.exports = function (RED) {
                     availableModes,
                     temperatureUnit: config.unit,
                     state: state$.value,
-                    bufferRangeCelsius: config.bufferRangeCelsius,
-                    commandOnlyTemperatureSetting: config.commandOnly,
-                    queryOnlyTemperatureSetting: config.queryOnly,
+                    bufferRangeCelsius: parseInt(config.bufferRangeCelsius, 10) || undefined,
+                    commandOnlyTemperatureSetting: config.commandOnly ?? undefined,
+                    queryOnlyTemperatureSetting: config.queryOnly ?? undefined,
                 })),
                 publishReplay(1),
                 refCount(),
@@ -58,7 +58,7 @@ module.exports = function (RED) {
             takeUntil(close$),
         ).subscribe(err => this.warn(err));
 
-        combineLatest(device$, state$)
+        combineLatest([device$, state$])
             .pipe(
                 tap(([_, state]) => notifyState(state)),
                 skip(1),

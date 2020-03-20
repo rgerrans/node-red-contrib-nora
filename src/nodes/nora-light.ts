@@ -26,6 +26,7 @@ module.exports = function (RED) {
         const brightnessControl = !!config.brightnesscontrol;
         const statepayload = !!config.statepayload;
         const colorControl = !!config.lightcolor;
+        const turnOnWhenBrightnessChanges = !!config.turnonwhenbrightnesschanges;
         const { value: onValue, type: onType } = convertValueType(RED, config.onvalue, config.onvalueType, { defaultValue: true });
         const { value: offValue, type: offType } = convertValueType(RED, config.offvalue, config.offvalueType, { defaultValue: false });
         const brightnessOverride = Math.max(0, Math.min(100, Math.round(config.brightnessoverride))) || 0;
@@ -56,6 +57,7 @@ module.exports = function (RED) {
                 switchMap(connection => connection.addDevice(config.id, {
                     type: 'light',
                     brightnessControl: brightnessControl,
+                    turnOnWhenBrightnessChanges: brightnessControl ? turnOnWhenBrightnessChanges : undefined,
                     colorControl: colorControl,
                     name: config.devicename,
                     roomHint: config.roomhint || undefined,
@@ -69,7 +71,7 @@ module.exports = function (RED) {
                 takeUntil(close$),
             );
 
-        combineLatest(device$, state$)
+        combineLatest([device$, state$])
             .pipe(
                 tap(([_, state]) => notifyState(state)),
                 skip(1),
@@ -104,10 +106,7 @@ module.exports = function (RED) {
             } else {
                 if (statepayload) {
                     this.send({
-                        payload: {
-                            on: state.on,
-                            brightness: state.brightness,
-                        },
+                        payload: { ...state },
                         topic: config.topic
                     });
                 } else {
@@ -134,10 +133,24 @@ module.exports = function (RED) {
             } else {
                 if (statepayload) {
                     if (typeof msg.payload !== 'object' || !msg.payload) {
-                        this.error('Payload must be an object like { [on]: true/false, [brightness]: 0-100 }');
+                        // tslint:disable-next-line: max-line-length
+                        this.error('Payload must be an object like { [on]: true/false, [brightness]: 0-100, [color]: { [spectrumHsv] : { [hue]: 0-360, [saturation]:0-1, [value]:0-1 } } }');
                     } else {
                         const state = { ...state$.value };
                         let update = false;
+                        if ('color' in msg.payload) {
+                            const color = msg.payload.color;
+                            if (validColor(color)) {
+                                state.color = {
+                                    spectrumHsv: {
+                                        hue: Math.max(0, Math.min(360, color.spectrumHsv.hue)),
+                                        saturation: Math.max(0, Math.min(1, color.spectrumHsv.saturation)),
+                                        value: Math.max(0, Math.min(1, color.spectrumHsv.value)),
+                                    }
+                                };
+                                update = true;
+                            }
+                        }
                         if ('brightness' in msg.payload && typeof msg.payload.brightness === 'number' && isFinite(msg.payload.brightness)) {
                             state.brightness = Math.max(1, Math.min(100, Math.round(msg.payload.brightness)));
                             update = true;
@@ -188,8 +201,24 @@ module.exports = function (RED) {
             if (brightnessControl) {
                 stateString += ` ${state.brightness}`;
             }
+            if (colorControl && state.color) {
+                stateString += ` hue: ${Number(state.color.spectrumHsv.hue).toFixed(2)}°`;
+                stateString += ` sat: ${Number(state.color.spectrumHsv.saturation * 100).toFixed(2)}%`;
+                stateString += ` val: ${Number(state.color.spectrumHsv.value * 100).toFixed(2)}%`;
+            }
+
             stateString$.next(`(${stateString})`);
         }
     });
 };
 
+function validColor(color: any): color is { spectrumHsv: { hue: number, saturation: number, value: number } } {
+    if (typeof color !== 'object' || !('spectrumHsv' in color) || typeof color.spectrumHsv !== 'object') {
+        return false;
+    }
+
+    const spectrumHsv = color.spectrumHsv;
+    return 'hue' in spectrumHsv && typeof spectrumHsv.hue === 'number' && isFinite(spectrumHsv.hue)
+        && 'saturation' in spectrumHsv && typeof spectrumHsv.saturation === 'number' && isFinite(spectrumHsv.saturation)
+        && 'value' in spectrumHsv && typeof spectrumHsv.value === 'number' && isFinite(spectrumHsv.value);
+}

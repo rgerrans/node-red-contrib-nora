@@ -42,7 +42,7 @@ module.exports = function (RED) {
             takeUntil(close$),
         ).subscribe(err => this.warn(err));
 
-        combineLatest(device$, state$)
+        combineLatest([device$, state$])
             .pipe(
                 tap(([_, state]) => notifyState(state)),
                 skip(1),
@@ -56,7 +56,9 @@ module.exports = function (RED) {
         ).subscribe(state => {
             notifyState(state);
             this.send({
-                payload: { openPercent: state.openPercent },
+                payload: {
+                    openPercent: adjustPercent(state.openPercent),
+                },
                 topic: config.topic
             });
         });
@@ -68,9 +70,10 @@ module.exports = function (RED) {
             if (typeof msg === 'object' && typeof msg.payload === 'object') {
                 const payload = msg.payload;
                 if ('openPercent' in payload && typeof payload.openPercent === 'number' && isFinite(payload.openPercent)) {
+                    const openPercent = Math.floor(Math.max(0, Math.min(100, payload.openPercent)));
                     state$.next({
                         ...state$.value,
-                        openPercent: Math.floor(Math.max(0, Math.min(100, payload.openPercent))),
+                        openPercent: adjustPercent(openPercent),
                     });
                 }
             }
@@ -82,7 +85,11 @@ module.exports = function (RED) {
         });
 
         function notifyState(state: BlindsState) {
-            stateString$.next(`(${state.openPercent}%)`);
+            stateString$.next(`(${adjustPercent(state.openPercent)}%)`);
+        }
+
+        function adjustPercent(openPercent: number) {
+            return config.invert ? 100 - openPercent : openPercent;
         }
     });
 };
